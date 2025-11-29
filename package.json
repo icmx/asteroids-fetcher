@@ -1,0 +1,14 @@
+{
+  "name": "asteroids-fetcher",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "main": "./index.js",
+  "scripts": {
+    "start": "node ./index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/icmx/asteroids-fetcher.git"
+  }
+}
