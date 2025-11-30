@@ -32,7 +32,7 @@ const CONFIG = (() => {
 })();
 
 export const main = async () => {
-  console.log('Hellol, world!');
+  console.log('Hello, world!');
   console.log(JSON.stringify(CONFIG, null, 2));
 };
 
