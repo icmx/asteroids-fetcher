@@ -18,9 +18,9 @@ const CONFIG = (() => {
   const baseUrl = env('AF_API_BASE_URL'); // e.g.: https://example.org/api
   const apiKey = env('AF_API_KEY');
 
-  const yesterday = new Date(Date.now() - 86400000)
-    .toJSON()
-    .substring(0, 10);
+  const now = Date.now();
+  const day = 86400000;
+  const yesterday = new Date(now - day).toJSON().substring(0, 10);
 
   return {
     retries: 3,
