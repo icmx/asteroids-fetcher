@@ -1,3 +1,5 @@
+import { env } from './utils.js';
+
 const CONFIG = (() => {
   const quotes = `
     AED AFN ALL AMD AOA ARS AUD AWG AZN BAM BBD BDT BHD BIF BMD BND
@@ -13,8 +15,8 @@ const CONFIG = (() => {
     .trim()
     .split(/\s+/);
 
-  const baseUrl = 'https://example.org/api';
-  const apiKey = 'api-key';
+  const baseUrl = env('AF_API_BASE_URL'); // e.g.: https://example.org/api
+  const apiKey = env('AF_API_KEY');
 
   const yesterday = new Date(Date.now() - 86400000)
     .toJSON()
