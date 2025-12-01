@@ -1,3 +1,5 @@
+import { appendFile, writeFile } from 'fs/promises';
+
 /**
  * @param {string} name
  * @returns {string}
@@ -89,5 +91,145 @@ export class HttpClient {
         }
       }
     }
+  }
+}
+
+/**
+ * @param {object} data
+ * @param {string} data.date
+ * @param {Record<string, number>} data.rates
+ * @param {object} options
+ * @param {string[]} options.quotes
+ * @returns {[string, string][]}
+ */
+export const dataToLines = (data, options) => {
+  const lines = Object.entries(data.rates)
+    .filter(([quote]) => {
+      return options.quotes.includes(quote);
+    })
+    .sort(([prevQuote], [nextQuote]) => {
+      return prevQuote.localeCompare(nextQuote);
+    })
+    .map(([quote, rate]) => {
+      return [quote, `${data.date},${rate || ''}`];
+    });
+
+  return lines;
+};
+
+/**
+ * @template T
+ */
+export class Concurrency {
+  /**
+   * @type {(() => Promise<T>)[]}
+   */
+  #promises;
+
+  /**
+   * @type {T[]}
+   */
+  #results;
+
+  /**
+   * @param {(() => Promise<T>)[]} promises
+   */
+  constructor(promises) {
+    this.#promises = promises;
+    this.#results = new Array(promises.length);
+  }
+
+  /**
+   * @param {object} options
+   * @param {number} options.batchSize
+   * @returns {Promise<void>}
+   */
+  async run(options) {
+    const { batchSize } = options;
+    let currentIndex = 0;
+
+    const worker = async () => {
+      while (currentIndex < this.#promises.length) {
+        const index = currentIndex++;
+
+        if (index < this.#promises.length) {
+          this.#results[index] = await this.#promises[index]();
+        }
+      }
+    };
+
+    const workers = Array(Math.min(batchSize, this.#promises.length))
+      .fill(null)
+      .map(() => worker());
+
+    await Promise.all(workers);
+    return this.#results;
+  }
+}
+
+/**
+ * @param {string} path
+ * @param {string} line
+ * @returns {Promise<void>}
+ */
+export const writeLine = async (path, line) => {
+  return writeFile(path, `${line}\n`, {
+    encoding: 'utf-8',
+    flag: 'w',
+  });
+};
+
+/**
+ * @param {string} path
+ * @param {string} line
+ * @returns {Promise<void>}
+ */
+export const appendLine = (path, line) => {
+  return appendFile(path, `${line}\n`, {
+    encoding: 'utf-8',
+    flag: 'a',
+  });
+};
+
+export class Fetcher {
+  /**
+   * @type {HttpClient}
+   */
+  #httpClient;
+
+  /**
+   * @type {string[]}
+   */
+  #quotes;
+
+  /**
+   * @param {object} options
+   * @param {HttpClient} options.httpClient
+   * @param {string[]} options.quotes
+   */
+  constructor(options) {
+    this.#httpClient = options.httpClient;
+    this.#quotes = options.quotes;
+  }
+
+  /**
+   * @param {string} url
+   * @param {object} options
+   * @param {(quote: string) => string} options.path
+   * @param {(path: string, line: string) => Promise<void>} options.handler
+   */
+  async run(url, options) {
+    const data = await this.#httpClient.get(url);
+    const lines = dataToLines(data, { quotes: this.#quotes });
+
+    const tasks = lines.map(([quote, line]) => {
+      const path = options.path(quote);
+
+      return () => {
+        return options.handler(path, line);
+      };
+    });
+
+    await new Concurrency(tasks).run({ batchSize: 4 });
   }
 }
