@@ -1,6 +1,6 @@
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { env, wait } from './utils.js';
+import { env, HttpClient, wait } from './utils.js';
 
 describe('env function', () => {
   let originalEnv;
@@ -115,5 +115,219 @@ describe('wait function', () => {
       elapsed < totalDelay + tolerance,
       `Should complete close to ${totalDelay}ms`
     );
+  });
+});
+
+describe('HttpClient', () => {
+  describe('get', () => {
+    let originalFetch;
+    let originalConsoleWarn;
+    let consoleWarnCalls;
+
+    beforeEach(() => {
+      originalFetch = global.fetch;
+      originalConsoleWarn = console.warn;
+      consoleWarnCalls = [];
+
+      console.warn = mock.fn((...args) => {
+        consoleWarnCalls.push(args);
+      });
+    });
+
+    afterEach(() => {
+      global.fetch = originalFetch;
+      console.warn = originalConsoleWarn;
+    });
+
+    it('should successfully fetch and parse JSON data', async () => {
+      const mockData = { id: 1, name: 'Test' };
+
+      global.fetch = mock.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => mockData,
+      }));
+
+      const client = new HttpClient();
+      const result = await client.get('https://example.org');
+
+      assert.deepEqual(result, mockData);
+      assert.equal(global.fetch.mock.calls.length, 1);
+      assert.equal(
+        global.fetch.mock.calls[0].arguments[0],
+        'https://example.org'
+      );
+    });
+
+    it('should throw error for non-ok response', async () => {
+      global.fetch = mock.fn(async () => ({
+        ok: false,
+        status: 404,
+        statusText: 'Not Found',
+      }));
+
+      const client = new HttpClient();
+
+      await assert.rejects(
+        async () =>
+          await client.get('https://api.example.com/notfound'),
+        new Error(
+          'HTTP 404: "Not Found" on "https://api.example.com/notfound"'
+        )
+      );
+    });
+
+    it('should retry on failure with backoff', async () => {
+      const mockData = { success: true };
+      let attemptCount = 0;
+
+      global.fetch = mock.fn(async () => {
+        attemptCount++;
+        if (attemptCount <= 2) {
+          throw new Error('Network error');
+        }
+
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => mockData,
+        };
+      });
+
+      const client = new HttpClient({
+        retries: 2,
+        backoff: 100, // Short backoff for testing
+      });
+
+      const startTime = Date.now();
+      const result = await client.get('https://example.org');
+      const elapsedTime = Date.now() - startTime;
+
+      assert.deepEqual(result, mockData);
+      assert.equal(global.fetch.mock.calls.length, 3);
+      assert.equal(consoleWarnCalls.length, 2);
+      assert(
+        elapsedTime >= 200,
+        'Should have waited for backoff periods'
+      );
+    });
+
+    it('should respect timeout setting', async () => {
+      global.fetch = mock.fn(async (url, options) => {
+        if (options.signal) {
+          return new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              resolve({
+                ok: true,
+                status: 200,
+                statusText: 'OK',
+                json: async () => ({ data: 'test' }),
+              });
+            }, 100);
+
+            options.signal.addEventListener('abort', () => {
+              clearTimeout(timeout);
+              reject(new Error('The operation was aborted'));
+            });
+          });
+        }
+      });
+
+      const client = new HttpClient({ timeout: 50 });
+
+      await assert.rejects(
+        async () => await client.get('https://api.example.com/slow'),
+        new Error('The operation was aborted')
+      );
+    });
+
+    it('should throw after all retries are exhausted', async () => {
+      global.fetch = mock.fn(async () => {
+        throw new Error('Network failure');
+      });
+
+      const client = new HttpClient({
+        retries: 2,
+        backoff: 50,
+      });
+
+      await assert.rejects(
+        async () => await client.get('https://example.org'),
+        new Error('Network failure')
+      );
+
+      assert.equal(global.fetch.mock.calls.length, 3); // initial + 2 retries
+      assert.equal(consoleWarnCalls.length, 2);
+    });
+
+    it('should log retry attempts with correct format', async () => {
+      let attemptCount = 0;
+
+      global.fetch = mock.fn(async () => {
+        attemptCount++;
+        if (attemptCount <= 2) {
+          throw new Error('Temporary failure');
+        }
+        return {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          json: async () => ({ success: true }),
+        };
+      });
+
+      const client = new HttpClient({
+        retries: 3,
+        backoff: 10,
+      });
+
+      await client.get('https://example.org');
+
+      assert.equal(consoleWarnCalls.length, 2);
+      assert.equal(
+        consoleWarnCalls[0][0],
+        'Attempt 1/3 failed for "https://example.org", retrying...'
+      );
+      assert.equal(
+        consoleWarnCalls[1][0],
+        'Attempt 2/3 failed for "https://example.org", retrying...'
+      );
+    });
+
+    it('should handle JSON parsing errors', async () => {
+      global.fetch = mock.fn(async () => ({
+        ok: true,
+        status: 200,
+        statusText: 'OK',
+        json: async () => {
+          throw new Error('Invalid JSON');
+        },
+      }));
+
+      const client = new HttpClient();
+
+      await assert.rejects(
+        async () => await client.get('https://api.example.com/invalid'),
+        new Error('Invalid JSON')
+      );
+    });
+
+    it('should work with zero retries', async () => {
+      global.fetch = mock.fn(async () => {
+        throw new Error('Network error');
+      });
+
+      const client = new HttpClient({ retries: 0 });
+
+      await assert.rejects(
+        async () => await client.get('https://example.org'),
+        new Error('Network error')
+      );
+
+      assert.equal(global.fetch.mock.calls.length, 1);
+      assert.equal(consoleWarnCalls.length, 0);
+    });
   });
 });
