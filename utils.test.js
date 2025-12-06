@@ -1,11 +1,16 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import {
+  appendLine,
   Concurrency,
   dataToLines,
   env,
   HttpClient,
   wait,
+  writeLine,
 } from './utils.js';
 
 describe('env function', () => {
@@ -470,5 +475,69 @@ describe('Concurrency', () => {
       concurrency.run({ batchSize: 2 }),
       new Error('Failed')
     );
+  });
+});
+
+describe('writeLine', () => {
+  let tempFile;
+
+  beforeEach(() => {
+    tempFile = join(
+      tmpdir(),
+      `temp-${Date.now()}-${Math.random()}.csv`
+    );
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(tempFile, { force: true });
+    } catch {}
+  });
+
+  it('should write line with newline to file', async () => {
+    await writeLine(tempFile, 'test line');
+
+    const content = await readFile(tempFile, 'utf-8');
+    assert.equal(content, 'test line\n');
+  });
+
+  it('should overwrite existing file', async () => {
+    await writeLine(tempFile, 'first line');
+    await writeLine(tempFile, 'second line');
+
+    const content = await readFile(tempFile, 'utf-8');
+    assert.equal(content, 'second line\n');
+  });
+});
+
+describe('appendLine', () => {
+  let tempFile;
+
+  beforeEach(() => {
+    tempFile = join(
+      tmpdir(),
+      `temp-${Date.now()}-${Math.random()}.csv`
+    );
+  });
+
+  afterEach(async () => {
+    try {
+      await rm(tempFile, { force: true });
+    } catch {}
+  });
+
+  it('should append line with newline to file', async () => {
+    await writeLine(tempFile, 'first line');
+    await appendLine(tempFile, 'second line');
+
+    const content = await readFile(tempFile, 'utf-8');
+    assert.equal(content, 'first line\nsecond line\n');
+  });
+
+  it('should create file if it does not exist', async () => {
+    await appendLine(tempFile, 'test line');
+
+    const content = await readFile(tempFile, 'utf-8');
+    assert.equal(content, 'test line\n');
   });
 });
