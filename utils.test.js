@@ -1,6 +1,6 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { env, HttpClient, wait } from './utils.js';
+import { dataToLines, env, HttpClient, wait } from './utils.js';
 
 describe('env function', () => {
   let originalEnv;
@@ -329,5 +329,63 @@ describe('HttpClient', () => {
       assert.equal(global.fetch.mock.calls.length, 1);
       assert.equal(consoleWarnCalls.length, 0);
     });
+  });
+});
+
+describe('dataToLines', () => {
+  it('should filter and sort rates correctly', () => {
+    const data = {
+      date: '2024-01-01',
+      rates: {
+        USD: 1.0,
+        EUR: 0.85,
+        GBP: 0.73,
+        JPY: 110.5,
+      },
+    };
+
+    const result = dataToLines(data, {
+      quotes: ['EUR', 'USD'],
+    });
+
+    assert.deepEqual(result, [
+      ['EUR', '2024-01-01,0.85'],
+      ['USD', '2024-01-01,1'],
+    ]);
+  });
+
+  it('should handle empty rates', () => {
+    const data = {
+      date: '2024-01-01',
+      rates: {
+        USD: null,
+        EUR: undefined,
+      },
+    };
+
+    const result = dataToLines(data, {
+      quotes: ['EUR', 'USD'],
+    });
+
+    assert.deepEqual(result, [
+      ['EUR', '2024-01-01,'],
+      ['USD', '2024-01-01,'],
+    ]);
+  });
+
+  it('should return empty array when no quotes match', () => {
+    const data = {
+      date: '2024-01-01',
+      rates: {
+        USD: 1.0,
+        EUR: 0.85,
+      },
+    };
+
+    const result = dataToLines(data, {
+      quotes: ['GBP', 'JPY'],
+    });
+
+    assert.deepEqual(result, []);
   });
 });
