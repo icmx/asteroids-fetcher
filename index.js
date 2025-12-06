@@ -1,4 +1,10 @@
-import { env } from './utils.js';
+import {
+  appendLine,
+  env,
+  Fetcher,
+  HttpClient,
+  writeLine,
+} from './utils.js';
 
 const CONFIG = (() => {
   const quotes = `
@@ -34,8 +40,26 @@ const CONFIG = (() => {
 })();
 
 export const main = async () => {
-  console.log('Hello, world!');
-  console.log(JSON.stringify(CONFIG, null, 2));
+  const httpClient = new HttpClient({
+    retries: CONFIG.retries,
+    timeout: CONFIG.timeout,
+    backoff: CONFIG.backoff,
+  });
+
+  const fetcher = new Fetcher({
+    httpClient,
+    quotes: CONFIG.quotes,
+  });
+
+  await fetcher.run(CONFIG.url, {
+    path: (quote) => `${CONFIG.basePath}/EUR/${quote}.csv`,
+    handler: appendLine,
+  });
+
+  await fetcher.run(CONFIG.latestUrl, {
+    path: (quote) => `${CONFIG.basePath}/EUR/${quote}.latest.csv`,
+    handler: writeLine,
+  });
 };
 
 main();
