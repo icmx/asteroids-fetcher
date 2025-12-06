@@ -8,6 +8,7 @@ import {
   Concurrency,
   dataToLines,
   env,
+  Fetcher,
   HttpClient,
   wait,
   writeLine,
@@ -539,5 +540,107 @@ describe('appendLine', () => {
 
     const content = await readFile(tempFile, 'utf-8');
     assert.equal(content, 'test line\n');
+  });
+});
+
+describe('Fetcher', () => {
+  let httpClient;
+  let fetcher;
+
+  beforeEach(() => {
+    httpClient = {
+      get: mock.fn(),
+    };
+  });
+
+  it('should fetch data and process lines', async () => {
+    const mockData = {
+      date: '2024-01-01',
+      rates: {
+        USD: 1.2,
+        EUR: 0.85,
+      },
+    };
+
+    httpClient.get.mock.mockImplementation(() =>
+      Promise.resolve(mockData)
+    );
+
+    const handlerMock = mock.fn(() => Promise.resolve());
+    const pathMock = mock.fn((quote) => `/path/${quote}.txt`);
+
+    fetcher = new Fetcher({
+      httpClient,
+      quotes: ['USD', 'EUR'],
+    });
+
+    await fetcher.run('http://example.org', {
+      path: pathMock,
+      handler: handlerMock,
+    });
+
+    assert.equal(httpClient.get.mock.calls.length, 1);
+
+    assert.equal(
+      httpClient.get.mock.calls[0].arguments[0],
+      'http://example.org'
+    );
+
+    assert.equal(pathMock.mock.calls.length, 2);
+    assert.equal(handlerMock.mock.calls.length, 2);
+
+    const calls = handlerMock.mock.calls.map((call) => call.arguments);
+
+    assert.deepEqual(calls[0], ['/path/EUR.txt', '2024-01-01,0.85']);
+    assert.deepEqual(calls[1], ['/path/USD.txt', '2024-01-01,1.2']);
+  });
+
+  it('should handle empty quotes', async () => {
+    const mockData = {
+      date: '2024-01-01',
+      rates: {
+        USD: 1.0,
+        EUR: 0.85,
+      },
+    };
+
+    httpClient.get.mock.mockImplementation(() =>
+      Promise.resolve(mockData)
+    );
+
+    const handlerMock = mock.fn(() => Promise.resolve());
+    const pathMock = mock.fn();
+
+    fetcher = new Fetcher({
+      httpClient,
+      quotes: [],
+    });
+
+    await fetcher.run('http://example.org', {
+      path: pathMock,
+      handler: handlerMock,
+    });
+
+    assert.equal(handlerMock.mock.calls.length, 0);
+    assert.equal(pathMock.mock.calls.length, 0);
+  });
+
+  it('should propagate httpClient errors', async () => {
+    httpClient.get.mock.mockImplementation(() =>
+      Promise.reject(new Error('Network error'))
+    );
+
+    fetcher = new Fetcher({
+      httpClient,
+      quotes: ['USD'],
+    });
+
+    await assert.rejects(
+      fetcher.run('http://test.com', {
+        path: () => '/path',
+        handler: () => Promise.resolve(),
+      }),
+      new Error('Network error')
+    );
   });
 });
