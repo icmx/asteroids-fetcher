@@ -1,6 +1,12 @@
 import { describe, it, beforeEach, afterEach, mock } from 'node:test';
 import assert from 'node:assert/strict';
-import { dataToLines, env, HttpClient, wait } from './utils.js';
+import {
+  Concurrency,
+  dataToLines,
+  env,
+  HttpClient,
+  wait,
+} from './utils.js';
 
 describe('env function', () => {
   let originalEnv;
@@ -387,5 +393,82 @@ describe('dataToLines', () => {
     });
 
     assert.deepEqual(result, []);
+  });
+});
+
+describe('Concurrency', () => {
+  it('should execute all promises and return results in order', async () => {
+    const promises = [
+      () => Promise.resolve(1),
+      () => Promise.resolve(2),
+      () => Promise.resolve(3),
+    ];
+
+    const concurrency = new Concurrency(promises);
+    const results = await concurrency.run({ batchSize: 2 });
+
+    assert.deepEqual(results, [1, 2, 3]);
+  });
+
+  it('should handle batch size larger than promises array', async () => {
+    const promises = [
+      () => Promise.resolve('a'),
+      () => Promise.resolve('b'),
+    ];
+
+    const concurrency = new Concurrency(promises);
+    const results = await concurrency.run({ batchSize: 10 });
+
+    assert.deepEqual(results, ['a', 'b']);
+  });
+
+  it('should handle single promise', async () => {
+    const promises = [() => Promise.resolve('single')];
+
+    const concurrency = new Concurrency(promises);
+    const results = await concurrency.run({ batchSize: 1 });
+
+    assert.deepEqual(results, ['single']);
+  });
+
+  it('should limit concurrent executions', async () => {
+    let concurrent = 0;
+    let maxConcurrent = 0;
+
+    const promises = Array(10)
+      .fill(null)
+      .map((_, i) => async () => {
+        concurrent++;
+
+        maxConcurrent = Math.max(maxConcurrent, concurrent);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+
+        concurrent--;
+
+        return i;
+      });
+
+    const concurrency = new Concurrency(promises);
+    await concurrency.run({ batchSize: 3 });
+
+    assert.ok(
+      maxConcurrent <= 3,
+      `Max concurrent was ${maxConcurrent}, expected <= 3`
+    );
+  });
+
+  it('should handle promise rejections', async () => {
+    const promises = [
+      () => Promise.resolve(1),
+      () => Promise.reject(new Error('Failed')),
+      () => Promise.resolve(3),
+    ];
+
+    const concurrency = new Concurrency(promises);
+
+    await assert.rejects(
+      concurrency.run({ batchSize: 2 }),
+      new Error('Failed')
+    );
   });
 });
